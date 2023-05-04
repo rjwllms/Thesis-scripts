@@ -1,0 +1,483 @@
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(cowplot)
+library(patchwork)
+
+
+#Import datasets
+gf1.data <- Read10X(data.dir = "/Users/reeganwillms/Documents/Reegan/School/Docs_UAlberta/Foley Lab/Foley Lab/Projects/R directories/GF1/outs/filtered_feature_bc_matrix")
+gf2.data <- Read10X(data.dir = "/Volumes/RNA_Seq/Larval2/raw_data/GF2_P/outs/filtered_feature_bc_matrix")
+cv1.data <- Read10X(data.dir = "/Users/reeganwillms/Documents/Reegan/School/Docs_UAlberta/Foley Lab/Foley Lab/Projects/R directories/CR1/outs/filtered_feature_bc_matrix")
+cv2.data <- Read10X(data.dir = "/Volumes/RNA_Seq/Larval2/raw_data/CV2_P/outs/filtered_feature_bc_matrix")
+
+#Set up control object (conventionally reared)
+cv1 <- CreateSeuratObject(counts = cv1.data, project = "DIG_CV", min.cells = 3)
+cv2 <- CreateSeuratObject(counts = cv2.data, project = "DIG_CV", min.cells = 3)
+cv <- merge(cv1, y = c(cv2), add.cell.ids = c("cv1", "cv2"), project = "DIG_CV")
+
+cv$gf <- "CV"
+cv <- subset(cv, subset = nFeature_RNA > 200 & nFeature_RNA < 2500)
+cv <- NormalizeData(cv, verbose = FALSE)
+cv[["percent.mt"]] <- PercentageFeatureSet(cv, pattern = "^mt-")
+cv <- subset(cv, subset = percent.mt < 50)
+cv <- FindVariableFeatures(cv, selection.method = "vst", nfeatures = 2000)
+
+#Set up germ-free object
+gf1 <- CreateSeuratObject(counts = gf1.data, project = "DIG_GF", min.cells = 3)
+gf2 <- CreateSeuratObject(counts = gf2.data, project = "DIG_GF", min.cells = 3)
+gf <- merge(gf1, y = c(gf2), add.cell.ids = c("gf1", "gf2"), project = "DIG_GF")
+
+gf$gf <- "GF"
+gf <- subset(gf, subset = nFeature_RNA > 200 & nFeature_RNA < 2500)
+gf <- NormalizeData(gf, verbose = FALSE)
+gf[["percent.mt"]] <- PercentageFeatureSet(gf, pattern = "^mt-")
+gf <- subset(gf, subset = percent.mt < 50)
+gf <- FindVariableFeatures(gf, selection.method = "vst", nfeatures = 2000)
+
+#Integrate CV and GF datasets
+Dig.anchors <- FindIntegrationAnchors(object.list = list(cv, gf), dims = 1:26)
+guts <- IntegrateData(anchorset = Dig.anchors, dims = 1:26)
+
+#Find conserved markers
+DefaultAssay(guts) <- "integrated"
+
+# Run the standard workflow for visualization and clustering
+guts <- ScaleData(guts, verbose = FALSE)
+guts <- RunPCA(guts, npcs = 26, verbose = FALSE)
+
+#Clustering
+guts <- RunUMAP(guts, dims = 1:26)
+guts <- RunTSNE(guts, dims= 1:26)
+guts <- FindNeighbors(guts, dims = 1:26)
+guts <- FindClusters(guts, resolution = 1)
+
+#CHECKPOINT - Save RDS
+saveRDS(guts, file = "integrated_guts.rds")
+guts <- readRDS("/Volumes/RNA_Seq/Larval Single Cell/Integrated/integrated_guts.rds")
+DefaultAssay(guts) <- "RNA"
+
+#Rename clusters
+guts <- RenameIdents(guts, '0'="EC1",'1'="Hepatocytes 3",'2'="EC4",'3'="Goblet 1",'4'="EC3",'5'="Acinar 1",
+                     '6'="Hepatocytes 2",'7'="Hepatocytes 1",'8'="EC2",'9'="Mesenchymal 1",'10'="Mesenchymal 2",'11'="Acinar 2",
+                     '12'="Goblet 2",'13'="Goblet-like",'14'="Acinar 3",'15'="Vascular Smooth Muscle",'16'="Endocrine 1",
+                     '17'="Epidermis 2",'18'="Progenitor-like 1",'19'="Epidermis 3",'20'="Leukocytes 1",'21'="EC5",
+                     '22'="Vascular Endothelial",'23'="Leukocytes 2",'24'="Epidermis 1",'25'="Progenitor-like 2",'26'="Tuft-like",
+                     '27'="Best4/Otop2",'28'="Endocrine 2",'29'="Mesenchymal 3",'30'="LRE 1",'31'="Muscle",
+                     '32'="LRE 2",'33'="Mesenchymal 4",'34'="Neuronal")
+gut_levels <- c("Progenitor-like 1","Progenitor-like 2", "Endocrine 1","Endocrine 2",
+                "Tuft-like","Goblet 1","Goblet 2","Goblet-like","EC1","EC2","EC3","EC4","EC5",
+                "LRE 1","LRE 2","Best4/Otop2","Mesenchymal 1","Mesenchymal 2","Mesenchymal 3","Mesenchymal 4","Muscle",
+                "Vascular Smooth Muscle","Vascular Endothelial","Leukocytes 1","Leukocytes 2","Neuronal","Hepatocytes 1","Hepatocytes 2","Hepatocytes 3",
+                "Acinar 1","Acinar 2","Acinar 3", "Epidermis 1","Epidermis 2","Epidermis 3")
+levels(guts) <- gut_levels
+
+#ALTERNATE CLUSTERING (SIMPLIFIED) ANNOTATION
+guts <- RenameIdents(guts, '0'="EC",'1'="Hepatocyte",'2'="EC",'3'="Goblet",'4'="EC",'5'="Acinar",
+                     '6'="Hepatocyte",'7'="Hepatocyte",'8'="EC",'9'="Mesenchymal",'10'="Mesenchymal",'11'="Acinar",
+                     '12'="Goblet",'13'="Goblet-like",'14'="Acinar",'15'="Muscle",'16'="Endocrine",
+                     '17'="Epidermis",'18'="Progenitor-like 1",'19'="Epidermis",'20'="Leukocyte",'21'="EC",
+                     '22'="Vasculature",'23'="Leukocyte",'24'="Epidermis",'25'="Progenitor-like 2",'26'="Tuft-like",
+                     '27'="Best4/Otop2",'28'="Endocrine",'29'="Mesenchymal",'30'="LRE",'31'="Muscle",
+                     '32'="LRE",'33'="Mesenchymal",'34'="Neuronal")
+gut_levels <- c("Progenitor-like 1","Progenitor-like 2", "Endocrine","Tuft-like","Goblet","Goblet-like","Ionocyte",
+                "EC","LRE","Best4/Otop2","Mesenchymal","Vasculature","Neuronal","Hepatocyte",
+                "Acinar","Muscle","Leukocyte","Epidermis")                     
+levels(guts) <- gut_levels
+
+
+#Visualization
+p1 <- DimPlot(guts, reduction = "tsne", group.by = "gf")
+p2 <- DimPlot(guts, reduction = "tsne", label = TRUE)
+plot_grid(p1, p2)
+
+DimPlot(guts, reduction = "tsne", label=TRUE)
+DimPlot(guts, reduction = "umap", label=TRUE)
+DimPlot(guts, reduction = "tsne", split.by = "gf")
+
+#Identify cluster markers
+CL11.markers <- FindConservedMarkers(guts, ident.1 = 11, grouping.var = "gf", verbose = FALSE, only.pos = TRUE)
+All.markers <- FindAllMarkers(guts, grouping.var = "gf", verbose = FALSE, only.pos = TRUE,min.pct = 0.25, logfc.threshold = 0.25)
+
+#Expression Analysis
+VlnPlot(guts, features = c("lygl1"),pt.size = 1)
+FeaturePlot(guts,reduction = "tsne", features = c("tnfsf11"))
+
+
+#Heatmap of marker genes (simple)
+#This one worked, not sure why some markers undetected- think they need to be present in EACH dataset (CV1/CV2)
+DoHeatmap(guts, features= gut.markers,draw.lines = FALSE, label=F) + scale_fill_gradientn(colors = c("lightsteelblue2", "white", "brown4"))
+
+
+#Code for analyzing subsets
+
+#ENTEROCYTE SUBSET
+EC_subset <- subset(guts, idents = c("EC1","EC2","EC3","EC4","EC5","LRE 1","LRE 2","Best4/Otop2"))
+EC_subset <- FindVariableFeatures(EC_subset, selection.method = "vst", nfeatures = 2000)
+EC_subset <- ScaleData(EC_subset)
+
+DimPlot(EC_subset, reduction = "tsne", label=TRUE)
+
+DoHeatmap(EC_subset, features= c(regional.markers), assay = "RNA",
+          draw.lines = FALSE, label=F, slot= "scale.data") + scale_fill_gradientn(colors = c("lightsteelblue2", "white", "brown4"))
+
+EC4.markers <- FindConservedMarkers(EC_subset, ident.1 = 4, grouping.var = "gf", verbose = FALSE)
+DefaultAssay(EC_subset) <- "RNA"
+
+VlnPlot(EC_subset, features = c("tmbim4"),pt.size = 1)
+FeaturePlot(EC_subset,reduction = "tsne", features = c("muc5.3"))
+
+#Heatmap for analyzing averaged gene expression across clusters
+cluster.averages <- AverageExpression(EC_subset)
+head(cluster.averages[["RNA"]][, 1:5])
+orig.levels <- levels(EC_subset)
+Idents(EC_subset) <- gsub(pattern = " ", replacement = "_", x = Idents(EC_subset))
+orig.levels <- gsub(pattern = " ", replacement = "_", x = orig.levels)
+levels(EC_subset) <- orig.levels
+cluster.averages <- AverageExpression(EC_subset, return.seurat = TRUE)
+cluster.averages
+
+DoHeatmap(cluster.averages, features = regional.markers, size = 3, assay = "RNA",
+          draw.lines = FALSE, label=F, slot= "scale.data") + scale_fill_gradientn(colors = colorRampPalette(c("lightsteelblue2", "white", "brown4"))(256))
+
+EC_subset
+
+
+#EPIDERMAL SUBSET
+Epidermis_subset <- subset(guts, idents = c("Epidermis 1","Epidermis 2","Epidermis 3"))
+Epidermis_subset <- FindVariableFeatures(Epidermis_subset, selection.method = "vst", nfeatures = 2000)
+Epidermis_subset <- ScaleData(Epidermis_subset)
+
+#export as 8x5
+DimPlot(Epidermis_subset, reduction = "tsne", label=TRUE)
+
+#Re-cluster Epidermal cells
+Epidermis_subset <- FindNeighbors(Epidermis_subset, dims = 1:5)
+DefaultAssay(Epidermis_subset) <- "integrated"
+Epidermis_subset <- FindClusters(Epidermis_subset, resolution = .5)
+
+DimPlot(Epidermis_subset, reduction = "tsne", label=TRUE)
+
+Epidermis.markers <- FindAllMarkers(Epidermis_subset, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+Epidermis.markers %>%
+  group_by(cluster) %>%
+  top_n(n = 10) -> top5
+DoHeatmap(Epidermis_subset, features = top5$gene) + NoLegend()+ scale_fill_gradientn(colors = c("lightsteelblue2", "white", "brown4"))
+DoHeatmap(Epidermis_subset, features = top5$gene)
+
+
+#GOBLET SUBSET
+Goblet_subset <- subset(guts, idents = c("Goblet 1","Goblet 2","Goblet-like"))
+Goblet_subset <- FindVariableFeatures(Goblet_subset, selection.method = "vst", nfeatures = 2000)
+Goblet_subset <- ScaleData(Goblet_subset)
+DimPlot(Goblet_subset, reduction = "tsne", label=TRUE)
+
+DoHeatmap(Goblet_subset, features= c(), assay = "RNA",
+          draw.lines = FALSE, label=F, slot= "scale.data") + scale_fill_gradientn(colors = c("lightsteelblue2", "white", "brown4"))
+
+
+table(Idents(guts))
+Goblet_levels <- c("Mesenchymal 1","Mesenchymal 2","Mesenchymal 3","Mesenchymal 4","Gobletocytes 1","Gobletocytes 2")
+levels(Goblet_subset) <- Goblet_levels
+
+Goblet4.markers <- FindConservedMarkers(Goblet_subset, ident.1 = 4, grouping.var = "gf", verbose = FALSE)
+DefaultAssay(Goblet_subset) <- "RNA"
+VlnPlot(Goblet_subset, features = c("cd74b"),pt.size = 1)
+
+FeaturePlot(Goblet_subset,reduction = "tsne", features = c("muc5.3"))
+
+Goblet_subset$celltype.gf <- paste(Idents(Goblet_subset), Goblet_subset$gf, sep = "_")
+Goblet_subset$celltype <- Idents(Goblet_subset)
+Idents(Goblet_subset) <- "celltype.gf"
+
+Goblet3_response <- FindMarkers(Goblet_subset, ident.1 = "3_GF", ident.2 = "3_CV", verbose = FALSE, logfc.threshold = 0)
+
+DefaultAssay(Goblet_subset) <- "RNA"
+
+plots <- VlnPlot(Goblet_subset, features = "agr2", group.by = "celltype", split.by = 'gf',
+                 pt.size = 0, combine = FALSE, split.plot=TRUE)
+wrap_plots(plots = plots, ncol = 1)
+
+plots <- VlnPlot(Goblet_subset, features = "BX908782.2", pt.size = 1, combine = FALSE)
+wrap_plots(plots = plots, ncol = 1)
+
+#Heatmap for Major Pathway Analysis
+cluster.averages <- AverageExpression(Goblet_subset)
+head(cluster.averages[["RNA"]][, 1:5])
+orig.levels <- levels(Goblet_subset)
+Idents(Goblet_subset) <- gsub(pattern = " ", replacement = "_", x = Idents(Goblet_subset))
+orig.levels <- gsub(pattern = " ", replacement = "_", x = orig.levels)
+levels(Goblet_subset) <- orig.levels
+cluster.averages <- AverageExpression(Goblet_subset, return.seurat = TRUE)
+cluster.averages
+
+Goblet_levels <- c("Mesenchymal_1_CV","Mesenchymal_1_GF","Mesenchymal_2_CV","Mesenchymal_2_GF","Mesenchymal_3_CV","Mesenchymal_3_GF",
+                 "Mesenchymal_4_CV","Mesenchymal_4_GF","Gobletocytes_1_CV","Gobletocytes_1_GF","Gobletocytes_2_CV","Gobletocytes_2_GF")
+levels(Goblet_subset) <- Goblet_levels
+
+
+#Heatmap of sig. DE genes in stromal/Gobletocyte pops.
+DoHeatmap(cluster.averages, features = c(cd81a,zgc:174863, rac2, adgrg3,vsir,relb,mpeg1.2,fgl2a,si:dkey-1h24.6,si:ch211-132p1.3,lyn,lgals9l3, "cxcl8a","cxcl19","tnfsf10l","tnfrsf1a", "tnfaip8l2a" ,"tnfa","tnfb",
+                                         "ilf2","il21r.1","ilf3b","il1b","il6r","il6st","il11ra","nfkbiab",lgals3b,ifitm1,irf2bp2b,irf2bpl,il11ra,litaf,ncor2,), size = 3, assay = "RNA",
+          draw.lines = FALSE, label=F, slot= "scale.data") + scale_fill_gradientn(colors = colorRampPalette(c("royalblue4", "gainsboro", "deeppink4"))(256))
+
+
+
+#LEUKOCYTE SUBSET
+
+Leuk_subset <- subset(guts, idents = c("Leukocytes 1","Leukocytes 2"))
+Leuk_subset <- FindVariableFeatures(Leuk_subset, selection.method = "vst", nfeatures = 2000)
+Leuk_subset <- ScaleData(Leuk_subset)
+DimPlot(Leuk_subset, reduction = "tsne", label=TRUE)
+
+DoHeatmap(Leuk_subset, features= c(), assay = "RNA",
+          draw.lines = FALSE, label=F, slot= "scale.data") + scale_fill_gradientn(colors = c("lightsteelblue2", "white", "brown4"))
+
+
+table(Idents(Leuk_subset))
+Leuk_levels <- c("Leukocytes 1","Leukocytes 2")
+levels(Leuk_subset) <- Leuk_levels
+
+DefaultAssay(Leuk_subset) <- "integrated"
+Leuk.markers <- FindAllMarkers(Leuk_subset, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+Leuk.markers %>%
+  group_by(cluster) %>%
+  top_n(n = 20) -> top5
+DoHeatmap(Leuk_subset, features = top5$gene) + NoLegend()+ scale_fill_gradientn(colors = c("lightsteelblue2", "white", "brown4"))
+DoHeatmap(Leuk_subset, features = top5$gene)
+
+
+Leuk4.markers <- FindConservedMarkers(Leuk_subset, ident.1 = 4, grouping.var = "gf", verbose = FALSE)
+DefaultAssay(Leuk_subset) <- "RNA"
+
+FeaturePlot(Leuk_subset,reduction = "tsne", features = c("havcr1","fcer1gl","mpeg1.1","mpx","csf1rb","spi2"))
+VlnPlot(Leuk_subset, features = c("arpc1b","runx3","ptprc","syk","fcer1g","sla2"),pt.size = 0)
+
+
+
+#Heatmap of sig. DE genes in stromal/leukocyte pops.
+DoHeatmap(cluster.averages, features = c(cd81a,zgc:174863, rac2, adgrg3,vsir,relb,mpeg1.2,fgl2a,si:dkey-1h24.6,si:ch211-132p1.3,lyn,lgals9l3, "cxcl8a","cxcl19","tnfsf10l","tnfrsf1a", "tnfaip8l2a" ,"tnfa","tnfb",
+                                         "ilf2","il21r.1","ilf3b","il1b","il6r","il6st","il11ra","nfkbiab",lgals3b,ifitm1,irf2bp2b,irf2bpl,il11ra,litaf,ncor2,), size = 3, assay = "RNA",
+          draw.lines = FALSE, label=F, slot= "scale.data") + scale_fill_gradientn(colors = colorRampPalette(c("royalblue4", "gainsboro", "deeppink4"))(256))
+
+
+#MESENCHYME SUBSET
+
+Mesen_subset <- subset(guts, idents = c("Mesenchymal 1","Mesenchymal 2","Mesenchymal 3","Mesenchymal 4"))
+Mesen_subset <- FindVariableFeatures(Mesen_subset, selection.method = "vst", nfeatures = 2000)
+Mesen_subset <- ScaleData(Mesen_subset)
+DimPlot(Mesen_subset, reduction = "tsne", label=TRUE)
+
+DoHeatmap(Mesen_subset, features= c(), assay = "RNA",
+          draw.lines = FALSE, label=F, slot= "scale.data") + scale_fill_gradientn(colors = c("lightsteelblue2", "white", "brown4"))
+
+DefaultAssay(Mesen_subset) <- "integrated"
+Mesen.markers <- FindAllMarkers(Mesen_subset, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+Mesen.markers %>%
+  group_by(cluster) %>%
+  top_n(n = 10) -> top5
+DoHeatmap(Mesen_subset, features = top5$gene) + NoLegend()+ scale_fill_gradientn(colors = c("lightsteelblue2", "white", "brown4"))
+DoHeatmap(Mesen_subset, features = top5$gene)
+
+
+DoHeatmap(Mesen_subset, features = Mesen.markers) + NoLegend()+ scale_fill_gradientn(colors = c("lightsteelblue2", "white", "brown4"))
+
+Mesen4.markers <- FindConservedMarkers(Mesen_subset, ident.1 = 4, grouping.var = "gf", verbose = FALSE)
+DefaultAssay(Mesen_subset) <- "RNA"
+
+FeaturePlot(Mesen_subset,reduction = "tsne", features = c("col5a1"))
+VlnPlot(Mesen_subset, features = c("pdgfra"),pt.size = 0)
+
+Mesen_subset$celltype.gf <- paste(Idents(Mesen_subset), Mesen_subset$gf, sep = "_")
+Mesen_subset$celltype <- Idents(Mesen_subset)
+Idents(Mesen_subset) <- "celltype.gf"
+
+
+DefaultAssay(Mesen_subset) <- "RNA"
+
+#Vln combining CV and GF
+plots <- VlnPlot(Mesen_subset, features = c("ptgdsb.1", "gc", "ambp"), group.by = "celltype", split.by = "gf", 
+                 pt.size = 0, combine = FALSE)
+wrap_plots(plots = plots, ncol = 1)
+
+
+
+VL_subset <- subset(guts, idents = c("Vascular Smooth Muscle","Vascular Endothelial","Leukocytes 1","Leukocytes 2"))
+VL_subset <- FindVariableFeatures(VL_subset, selection.method = "vst", nfeatures = 2000)
+VL_subset <- ScaleData(VL_subset)
+
+
+VL_subset$celltype.gf <- paste(Idents(VL_subset), VL_subset$gf, sep = "_")
+VL_subset$celltype <- Idents(VL_subset)
+Idents(VL_subset) <- "celltype.gf"
+
+DefaultAssay(VL_subset) <- "RNA"
+
+#Vln combining CV and GF
+plots <- VlnPlot(VL_subset, features = c("gc","mycb", "socs3a"), group.by = "celltype", split.by = "gf", 
+                 pt.size = 0, combine = FALSE)
+wrap_plots(plots = plots, ncol = 1)
+
+
+#STROMAL SUBSET
+Stromal_subset <- subset(guts, idents = c("Mesenchymal 1","Mesenchymal 2","Mesenchymal 3","Mesenchymal 4","Vascular Smooth Muscle","Vascular Endothelial"))
+Stromal_subset <- FindVariableFeatures(Stromal_subset, selection.method = "vst", nfeatures = 2000)
+Stromal_subset <- ScaleData(Stromal_subset)
+
+
+Stromal_subset$celltype.gf <- paste(Idents(Stromal_subset), Stromal_subset$gf, sep = "_")
+Stromal_subset$celltype <- Idents(Stromal_subset)
+Idents(Stromal_subset) <- "celltype.gf"
+
+
+Stromal_levels <- c("Mesenchymal 1_CV","Mesenchymal 1_GF","Mesenchymal 2_CV","Mesenchymal 2_GF","Mesenchymal 3_CV","Mesenchymal 3_GF","Mesenchymal 4_CV","Mesenchymal 4_GF",
+                    "Vascular Smooth Muscle_CV","Vascular Smooth Muscle_GF","Vascular Endothelial_CV","Vascular Endothelial_GF")
+levels(Stromal_subset) <- Stromal_levels
+DefaultAssay(Stromal_subset) <- "RNA"
+
+cluster.averages <- AverageExpression(Stromal_subset)
+head(cluster.averages[["RNA"]][, 1:5])
+orig.levels <- levels(Stromal_subset)
+Idents(Stromal_subset) <- gsub(pattern = " ", replacement = "_", x = Idents(Stromal_subset))
+orig.levels <- gsub(pattern = " ", replacement = "_", x = orig.levels)
+levels(Stromal_subset) <- orig.levels
+cluster.averages <- AverageExpression(Stromal_subset, return.seurat = TRUE)
+cluster.averages
+
+DoHeatmap(cluster.averages, features = cccc, size = 3, assay = "RNA",
+          draw.lines = FALSE, label=F, slot= "scale.data") + scale_fill_gradientn(colors = colorRampPalette(c("lightsteelblue2", "white", "brown4"))(256))
+
+
+#PROGENITOR SUBSET
+Prog_subset <- subset(guts, idents = c("Progenitor-like 1","Progenitor-like 2"))
+Prog_subset <- FindVariableFeatures(Prog_subset, selection.method = "vst", nfeatures = 2000)
+Prog_subset <- ScaleData(Prog_subset)
+DimPlot(Prog_subset, reduction = "tsne", label=TRUE)
+
+#Re-cluster Progenitors
+Prog_subset <- FindNeighbors(Prog_subset, dims = 1:10)
+DefaultAssay(Prog_subset) <- "integrated"
+Prog_subset <- FindClusters(Prog_subset, resolution = .5)
+
+DimPlot(Prog_subset, reduction = "tsne", label=TRUE)
+
+Prog.markers <- FindAllMarkers(Prog_subset, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+Prog.markers %>%
+  group_by(cluster) %>%
+  top_n(n = 10) -> top5
+DoHeatmap(Prog_subset, features = top5$gene) + NoLegend()+ scale_fill_gradientn(colors = c("lightsteelblue2", "white", "brown4"))
+DoHeatmap(Prog_subset, features = top5$gene)
+
+
+DoHeatmap(Prog_subset, features= c(), assay = "RNA",
+  draw.lines = FALSE, label=F, slot= "scale.data") + scale_fill_gradientn(colors = c("lightsteelblue2", "white", "brown4"))
+
+
+table(Idents(guts))
+Prog_levels <- c("Progenitor-like 1","Progenitor-like 2")
+levels(Prog_subset) <- Prog_levels
+
+Prog4.markers <- FindConservedMarkers(Prog_subset, ident.1 = 4, grouping.var = "gf", verbose = FALSE)
+DefaultAssay(Prog_subset) <- "RNA"
+VlnPlot(Prog_subset, features = c("lgr6"),pt.size = 1)
+
+FeaturePlot(Prog_subset,reduction = "tsne", features = c("tnfrsf11a"))
+
+Prog_subset$celltype.gf <- paste(Idents(Prog_subset), Prog_subset$gf, sep = "_")
+Prog_subset$celltype <- Idents(Prog_subset)
+Idents(Prog_subset) <- "celltype.gf"
+
+Prog3_response <- FindMarkers(Prog_subset, ident.1 = "3_GF", ident.2 = "3_CV", verbose = FALSE, logfc.threshold = 0)
+
+DefaultAssay(Prog_subset) <- "RNA"
+
+plots <- VlnPlot(Prog_subset, features = "tnfrsf11a", group.by = "celltype", split.by = 'gf',
+                 pt.size = 0, combine = FALSE, split.plot=TRUE)
+wrap_plots(plots = plots, ncol = 1)
+
+VlnPlot(Prog_subset, features = "tnfrsf11a")
+
+#IEC SUBSET
+IECs <- subset(guts, idents=c("Progenitor-like 1","Progenitor-like 2", "Endocrine 1","Endocrine 2", "Tuft-like","Goblet 1","Goblet 2","Goblet-like",
+                              "EC1","EC2","EC3","EC4","EC5","LRE 1","LRE 2","Best4/Otop2"))
+IEC_levels <- c("Progenitor-like 1","Progenitor-like 2", "Endocrine 1","Endocrine 2", "Tuft-like","Goblet 1","Goblet 2","Goblet-like",
+                "EC1","EC2","EC3","EC4","EC5","LRE 1","LRE 2","Best4/Otop2")
+levels(IECs) <- IEC_levels
+IECs <- FindVariableFeatures(IECs, selection.method = "vst", nfeatures = 2000)
+IECs <- ScaleData(IECs)
+
+
+FeaturePlot(IECs,reduction = "tsne", features = c("pou2f3"),cols = c("gainsboro", "burlywood3", "brown4"))
+
+
+#Endocrine SUBSET
+ENDO <- subset(guts, idents=c("Endocrine 1", "Endocrine 2"))
+
+ENDO <- FindVariableFeatures(ENDO, selection.method = "vst", nfeatures = 2000)
+ENDO <- ScaleData(ENDO)
+DimPlot(ENDO, reduction = "tsne", label=TRUE)
+
+#Re-cluster ENDOCRINE
+ENDO <- FindNeighbors(ENDO, dims = 1:10)
+DefaultAssay(ENDO) <- "integrated"
+ENDO <- FindClusters(ENDO, resolution = .5)
+
+DimPlot(ENDO, reduction = "tsne", label=TRUE)
+
+Endo.markers <- FindAllMarkers(ENDO, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+Endo.markers %>%
+  group_by(cluster) %>%
+  top_n(n = 10) -> top10
+DoHeatmap(ENDO, features = top10$gene) + NoLegend()+ scale_fill_gradientn(colors = c("lightsteelblue2", "white", "brown4"))
+
+ENDO$celltype.gf <- paste(Idents(ENDO), ENDO$gf, sep = "_")
+ENDO$celltype <- Idents(ENDO)
+Idents(ENDO) <- "celltype.gf"
+
+Endo5_response <- FindMarkers(ENDO, ident.1 = "5_GF", ident.2 = "5_CV", verbose = FALSE, logfc.threshold = 0)
+
+DefaultAssay(ENDO) <- "RNA"
+#hormone plot= 5x30
+plots <- VlnPlot(ENDO, features = Secretory_Hormones, group.by = "celltype", split.by = 'gf',
+                 pt.size = 0, combine = FALSE, split.plot=TRUE)
+wrap_plots(plots = plots, ncol = 1)
+
+
+#ANALYZING GLOBAL GENE EXPRESSION CHANGES
+guts <- RenameIdents(guts, '0'="GUT",'1'="GUT",'2'="GUT",'3'="GUT",'4'="GUT",'5'="GUT",
+                     '6'="GUT",'7'="GUT",'8'="GUT",'9'="GUT",'10'="GUT",'11'="GUT",
+                     '12'="GUT",'13'="GUT",'14'="GUT",'15'="GUT",'16'="GUT",
+                     '17'="GUT",'18'="GUT",'19'="GUT",'20'="GUT",'21'="GUT",
+                     '22'="GUT",'23'="GUT",'24'="GUT",'25'="GUT",'26'="GUT",
+                     '27'="GUT",'28'="GUT",'29'="GUT",'30'="GUT",'31'="GUT",
+                     '32'="GUT",'33'="GUT",'34'="GUT")
+
+guts$celltype.gf <- paste(Idents(guts), guts$gf, sep = "_")
+guts$celltype <- Idents(guts)
+Idents(guts) <- "celltype.gf"
+
+
+DefaultAssay(guts) <- "RNA"
+
+#DE GENES - Need to run with DefaultAssay(guts) <- "RNA"
+guts_response <- FindMarkers(guts, ident.1 = "GUT_GF", ident.2 = "GUT_CV", verbose = FALSE, logfc.threshold = 0)
+
+
+
+#For gettiing data to upload to the BROAD SINGLE CELL PORTAL
+
+#USED THE COMBINED DATASET, POST-QC. UPLOADED THE 'PROCESSED DATA' ONLY (RAW DATA AVAILABLE ON GEO) 
+library(data.table)
+
+#This gives the processed expression matrix for BROAD SCP
+Integrated_expression_matrix <- as.data.frame(as.matrix(guts@assays$RNA@data))
+fwrite(x = Integrated_expression_matrix, row.names= TRUE, file = "Integrated_Expression_Matrix.txt")
+
+#This gives spatial data for each cell
+export(guts@reductions$tsne@cell.embeddings, "Integrated_tsne.csv",  row.names = TRUE)
+
+#This gives active idents (cell types) for each cell
+Integrated_idents <- as.data.frame(as.matrix(guts@active.ident))
+fwrite(x = Integrated_idents, row.names= TRUE, file = "Integrated_Idents.csv")
+
+
