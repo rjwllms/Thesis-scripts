@@ -1,0 +1,267 @@
+library(dplyr)
+library(Seurat)
+library(patchwork)
+library(ggplot2)
+
+#Import data & create qualified object
+Mock.data <- Read10X(data.dir = "/Users/reeganwillms/Documents/Reegan/School/Docs_UAlberta/Foley Lab/Foley Lab/Adult Vibrio/Raw Data/Mock_tx/filtered_feature_bc_matrix/")
+
+Mock <- CreateSeuratObject(counts = Mock.data, project = "MOCK", min.cells = 3, min.features = 200)
+Mock
+
+Mock[["percent.mt"]] <- PercentageFeatureSet(Mock, pattern = "^mt-")
+VlnPlot(Mock, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+
+Mock <- subset(Mock, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 25)
+Mock
+
+Mock <- NormalizeData(Mock, normalization.method = "LogNormalize", scale.factor = 10000)
+
+Mock <- FindVariableFeatures(Mock, selection.method = "vst", nfeatures = 2000)
+
+#Scale the data
+all.genes <- rownames(Mock)
+Mock <- ScaleData(Mock, features = all.genes)
+
+#Dimension reduction
+Mock <- RunPCA(Mock, features = VariableFeatures(object = Mock))
+
+#PICK PCs 50! I think we need higher PCs here (50), as heterogeneity in the PC plots can still be observed up to PC 30 (see below)
+DimHeatmap(Mock, dims = 1:30, cells = 500, balanced = TRUE)
+
+#Cluster cells
+Mock <- FindNeighbors(Mock, dims = 1:50)
+Mock <- FindClusters(Mock, resolution = 0.8)
+
+#Non-linear dimension reduction
+Mock <- RunUMAP(Mock, dims = 1:50)
+DimPlot(Mock, reduction = "umap",pt.size = .4, label=T)
+
+Mock <- RunTSNE(Mock, dims = 1:50)
+DimPlot(Mock, reduction = "tsne",pt.size = .4, label=T)
+
+saveRDS(Mock, file = "Mock.rds")
+Mock <- readRDS("/Users/reeganwillms/Documents/Reegan/School/Docs_UAlberta/Foley Lab/Foley Lab/Adult Vibrio/Mock.rds")
+
+#VISUALIZE
+DimPlot(Mock, reduction = "umap",pt.size = .4,label = T)
+DimPlot(Mock, reduction = "tsne",pt.size = .4, label=T)
+
+#Visualize Genes
+VlnPlot(Mock, features = c("il1fma"), slot = "counts", log = TRUE)
+VlnPlot(Mock, features = c("atoh1b"), log = TRUE)
+FeaturePlot(Mock, features = "tnfrsf11a",reduction = "tsne" ,pt.size = .4, order=TRUE)
+
+#Find Markers to identify clusters
+CL31.markers <- FindMarkers(Mock, ident.1 = 31, min.pct = 0.25)
+
+#Rename clusters based on genetic markers
+Mock <- RenameIdents(Mock, '0'="EC1",'1'="LRE1",'2'="Leukocyte 1",'3'="EC3",'4'="BO1",'5'="Goblet",
+                     '6'="LRE2",'7'="Progenitor",'8'="EC2",'9'="Tuft-like",'10'="Endocrine 1",
+                     '11'="Leukocyte 2", '12'="Endocrine 2",'13'="Leukocyte 3",'14'="Goblet-like",
+                     '15'="Leukocyte 4",'16'="Endocrine 3",'17'="Endocrine 4",'18'="Cycling",
+                     '19'="Unknown 1",'20'="LRE3",'21'="BO2",'22'="Endocrine 5",'23'="Leukocyte 5",
+                     '24'="Unknown 2",'25'="Stromal 1",'26'="Unknown 3",'27'="Leukocyte 6",
+                     '28'="Pancreatic",'29'="Epidermal",'30'="Stromal 2",'31'="Leukocyte 7")
+
+Mock_levels <- c("Cycling","Progenitor",
+                "Endocrine 1","Endocrine 2","Endocrine 3","Endocrine 4","Endocrine 5",
+                "Goblet","Goblet-like","Tuft-like",
+                "EC1","EC2","EC3","LRE1","LRE2","LRE3","BO1","BO2",
+                "Stromal 1","Stromal 2",
+                "Leukocyte 1","Leukocyte 2","Leukocyte 3","Leukocyte 4","Leukocyte 5","Leukocyte 6","Leukocyte 7",
+                "Pancreatic","Epidermal","Unknown 1","Unknown 2", "Unknown 3")
+levels(Mock) <- Mock_levels
+
+
+#ANNOTATIIONS FOR BROAD SINGLE CELL PORTAL - ALL CELLS
+Mock <- RenameIdents(Mock, '0'="EC",'1'="LRE",'2'="T Cell",'3'="EC",'4'="Best4/Otop2",'5'="Goblet",
+                     '6'="LRE",'7'="Progenitor",'8'="EC",'9'="Tuft-like",'10'="Endocrine",
+                     '11'="Macrophage", '12'="Endocrine",'13'="T Cell",'14'="Goblet-like",
+                     '15'="Dendritic Cell",'16'="Endocrine",'17'="Endocrine",'18'="Cycling",
+                     '19'="Unknown 1",'20'="LRE",'21'="Best4/Otop2",'22'="Endocrine",'23'="T Cell",
+                     '24'="Unknown 2",'25'="Stromal 1",'26'="Unknown 3",'27'="B Cell",
+                     '28'="Pancreatic",'29'="Epidermal",'30'="Stromal 2",'31'="Granulocyte")
+
+Mock_levels <- c("Cycling","Progenitor",
+                 "Endocrine",
+                 "Goblet","Goblet-like","Tuft-like",
+                 "EC","LRE","Best4/Otop2",
+                 "Stromal 1","Stromal 2",
+                 "T Cell","Macrophage","Dendritic Cell","B Cell","Granulocyte",
+                 "Pancreatic","Epidermal","Unknown 1","Unknown 2", "Unknown 3")
+levels(Mock) <- Mock_levels
+
+
+
+#SUBSET ANALYSIS
+
+#ALL IECs
+IEC_subset <- subset(Mock, idents = c("Cycling","Progenitor",
+                                    "Endocrine 1","Endocrine 2","Endocrine 3","Endocrine 4","Endocrine 5",
+                                    "Goblet","Goblet-like","Tuft-like",
+                                    "EC1","EC2","EC3","LRE1","LRE2","LRE3","BO1","BO2"))
+IEC_levels <- c("Progenitor","Cycling",
+                "Endocrine 1","Endocrine 2","Endocrine 3","Endocrine 4","Endocrine 5",
+                "Goblet","Goblet-like","Tuft-like",
+                "EC1","EC2","EC3","LRE1","LRE2","LRE3","BO1","BO2")
+levels(IEC_subset) <- IEC_levels
+
+IEC.markers <- FindAllMarkers(IEC_subset, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.5)
+IEC.markers %>%
+  group_by(cluster) %>%
+  top_n(n = 10, wt = avg_log2FC) -> top10
+
+IEC_subset <- FindVariableFeatures(IEC_subset, selection.method = "vst", nfeatures = 2000)
+IEC_subset <- ScaleData(IEC_subset)
+
+VlnPlot(IEC_subset, features = c("anxa4"), slot = "counts", log = TRUE)
+VlnPlot(Mock, features = c("anxa4"), log = TRUE)
+FeaturePlot(IEC_subset, features = "pou2f3",reduction = "tsne" ,pt.size = .4, cols = c("gainsboro", "burlywood3", "brown4"))
+
+
+#ENDOCRINE
+EE_subset <- subset(Mock, idents = c("Endocrine 1","Endocrine 2","Endocrine 3","Endocrine 4","Endocrine 5"))
+EE_levels <- c("Endocrine 1","Endocrine 2","Endocrine 3","Endocrine 4","Endocrine 5")
+levels(EE_subset) <- EE_levels
+DimPlot(EE_subset, reduction = "tsne",pt.size = 1, label=T)
+EE_subset <- FindNeighbors(EE_subset, dims = 1:50)
+EE_subset <- FindClusters(EE_subset, resolution = 0.15)
+FeaturePlot(EE_subset, features = "adcyap1b",reduction = "tsne" ,pt.size = .4, )
+peptide_hormones <- c("vipb","pyyb","insl5a","galn","ccka","mlnl","gip","ghrl","ins","nmbb","penka","adcyap1a","gcga","gcgb")
+DotPlot(EE_subset, features = peptide_hormones) + RotatedAxis()+ scale_fill_gradientn(colors = c("lightsteelblue2", "white", "brown4"))
+EE.markers <- FindAllMarkers(EE_subset, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.5, verbose = FALSE)
+
+EE_subset
+EE_subset <- RenameIdents(EE_subset, '0'="Endocrine 1",'1'="Endocrine 2",'2'="Endocrine 3",
+                          '3'="Endocrine 4",'4'="Endocrine 5",'5'="Endocrine 6",'6'="Endocrine 7",'7'="Endocrine 8")
+
+#TUFT
+Tuft <- subset(Mock, idents = c("Tuft-like"))
+DimPlot(Tuft, reduction = "tsne",pt.size = .4, label=T)
+FeaturePlot(Tuft, features = "grna",reduction = "tsne" ,pt.size = .4, )
+Tuft <- FindNeighbors(Tuft, dims = 1:50)
+Tuft <- FindClusters(Tuft, resolution = 0.1)
+Tuft <- FindVariableFeatures(Tuft, selection.method = "vst", nfeatures = 2000)
+Tuft <- ScaleData(Tuft)
+DimPlot(Tuft, reduction = "tsne", label=TRUE)
+Tuft <- RenameIdents(Tuft, '0'="Tuft-like 1",'1'="Tuft-like 2")
+
+Tuft.markers <- FindAllMarkers(Tuft, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.5, verbose = FALSE)
+Tuft
+DoHeatmap(Tuft, features= Tuft_markers,draw.lines = FALSE, label=F, slot= "counts") + scale_fill_gradientn(colors = c("#4B68B8", "white", "#940050"))
+#USED COUNTS NOT SCALE DATA SLOT- scale data won't display genes that are not at all expressed in one of the clusters
+DoHeatmap(Tuft, features= Tuft_markers,draw.lines = FALSE, label=F, slot= "counts") + scale_fill_gradientn(colors = c("#E4E5F0","#B20060", "#940050"))
+FeaturePlot(Tuft, features = "alox5a",reduction = "tsne" ,pt.size = .4)
+
+#Goblet
+Goblet <- subset(Mock, idents=c("Goblet","Goblet-like"))
+DimPlot(Goblet, reduction = "tsne",pt.size = .4, label=T)
+
+#ENTEROCYTES
+Enterocytes <- subset(Mock, idents = c("EC1","EC2","EC3"))
+DimPlot(Enterocytes, reduction = "tsne",pt.size = .4, label=T)
+FeaturePlot(Enterocytes, features = "grna",reduction = "tsne" ,pt.size = .4, )
+Enterocytes <- FindNeighbors(Enterocytes, dims = 1:50)
+Enterocytes <- FindClusters(Enterocytes, resolution = 0.3)
+Enterocytes <- FindVariableFeatures(Enterocytes, selection.method = "vst", nfeatures = 2000)
+Enterocytes <- ScaleData(Enterocytes)
+DimPlot(Enterocytes, reduction = "tsne", label=TRUE)
+Enterocytes.markers <- FindAllMarkers(Enterocytes, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.5, verbose = FALSE)
+Enterocytes
+DoHeatmap(Enterocytes, features= EC_marker_shortlist$GENES,draw.lines = FALSE, label=F, slot= "scale.data") + scale_fill_gradientn(colors = c("#4B68B8", "white", "#940050"))
+FeaturePlot(Enterocytes, features = "slc15a2",reduction = "tsne" ,pt.size = .4)
+
+Enterocytes <- RenameIdents(Enterocytes, '0'="EC1",'1'="EC2",'2'="EC3",'3'="EC4")
+
+#LREs
+LREs <- subset(Mock, idents = c("LRE1","LRE2","LRE3"))
+DimPlot(LREs, reduction = "tsne",pt.size = .4, label=T)
+FeaturePlot(LREs, features = "grna",reduction = "tsne" ,pt.size = .4, )
+LREs <- FindNeighbors(LREs, dims = 1:50)
+LREs <- FindClusters(LREs, resolution = 0.2)
+LREs <- FindVariableFeatures(LREs, selection.method = "vst", nfeatures = 2000)
+LREs <- ScaleData(LREs)
+DimPlot(LREs, reduction = "tsne", label=TRUE)
+LREs.markers <- FindAllMarkers(LREs, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.5, verbose = FALSE)
+LREs
+DoHeatmap(LREs, features= LRE_marker_shortlist$GENES,draw.lines = FALSE, label=F, slot= "scale.data") + scale_fill_gradientn(colors = c("#4B68B8", "white", "#940050"))
+FeaturePlot(LREs, features = "cd36",reduction = "tsne" ,pt.size = .4)
+
+#BEST4 OTOP2
+BO <- subset(Mock, idents = c("BO1","BO2"))
+DimPlot(BO, reduction = "tsne",pt.size = .4, label=T)
+FeaturePlot(BO, features = "grna",reduction = "tsne" ,pt.size = .4, )
+BO <- FindNeighbors(BO, dims = 1:50)
+BO <- FindClusters(BO, resolution = 0.2)
+BO <- FindVariableFeatures(BO, selection.method = "vst", nfeatures = 2000)
+BO <- ScaleData(BO)
+DimPlot(BO, reduction = "tsne", label=TRUE)
+BO.markers <- FindAllMarkers(BO, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.5, verbose = FALSE)
+BO
+DoHeatmap(BO, features= BO_marker_shortlist$GENE,draw.lines = FALSE, label=F, slot= "scale.data") + scale_fill_gradientn(colors = c("#4B68B8", "white", "#940050"))
+#USED COUNTS NOT SCALE DATA SLOT- scale data won't display genes that are not at all expressed in one of the clusters
+DoHeatmap(BO, features= BO_marker_shortlist$GENE, draw.lines = FALSE, label=F, slot= "counts") + scale_fill_gradientn(colors = c("#E4E5F0","#B20060", "#940050"))
+FeaturePlot(BO, features = "dgat2",reduction = "tsne" ,pt.size = .4)
+
+BO <- RenameIdents(BO, 'BO1'="Best4/Otop2 1",'BO2'="Best4/Otop2 2")
+
+
+#Export data to exce1
+install.packages("rio")
+library(rio)
+export(BO.markers, "BO.markers.xlsx",  row.names = TRUE)
+
+
+#For data to upload to BROAD INSTITUTE SINGLE CELL PORTAL
+library(data.table)
+library(rio)
+#This gives the processed expression matrix for BROAD SCP
+Expression_matrix <- as.data.frame(as.matrix(Mock@assays$RNA@data))
+fwrite(x = Expression_matrix, row.names= TRUE, file = "Adult_Expression_Matrix.txt")
+
+#This gives spatial data for each cell
+export(Mock@reductions$tsne@cell.embeddings, "Mock_tsne.csv",  row.names = TRUE)
+
+#This gives active idents (cell types) for each cell
+Mock_idents <- as.data.frame(as.matrix(Mock@active.ident))
+fwrite(x = Mock_idents, row.names= TRUE, file = "WholeGut_Idents.csv")
+
+
+#SECRETORY SUBSET FOR BROAD
+Secretory <- merge(EE_subset, y = c(Tuft, Goblet), add.cell.ids = c("EE", "Tuft-like","Goblet"), project = "MOCK")
+Secretory <- FindVariableFeatures(Secretory, selection.method = "vst", nfeatures = 2000)
+Secretory <- ScaleData(Secretory, verbose = FALSE)
+Secretory <- RunPCA(Secretory, features = VariableFeatures(object = Secretory))
+Secretory <- RunTSNE(Secretory, dims = 1:50)
+DimPlot(Secretory, reduction = "tsne",pt.size = .4, label=T)
+
+Secretory_Expression_matrix <- as.data.frame(as.matrix(Secretory@assays$RNA@data))
+fwrite(x = Secretory_Expression_matrix, row.names= TRUE, file = "Secretory_Expression_Matrix.txt")
+
+#This gives spatial data for each cell
+export(Secretory@reductions$tsne@cell.embeddings, "Secretory_tsne.csv",  row.names = TRUE)
+
+#This gives active idents (cell types) for each cell
+Secretory_idents <- as.data.frame(as.matrix(Secretory@active.ident))
+fwrite(x = Secretory_idents, row.names= TRUE, file = "Secretory_Idents.csv")
+
+#ABSORPTIVE SUBSET FOR BROAD
+Absorptive <- merge(Enterocytes, y = c(LREs, BO), add.cell.ids = c("ECs", "LREs","Best4.Otop2 Cells"), project = "MOCK")
+Absorptive <- FindVariableFeatures(Absorptive, selection.method = "vst", nfeatures = 2000)
+Absorptive <- ScaleData(Absorptive, verbose = FALSE)
+Absorptive <- RunPCA(Absorptive, features = VariableFeatures(object = Absorptive))
+Absorptive <- RunTSNE(Absorptive, dims = 1:50)
+DimPlot(Absorptive, reduction = "tsne",pt.size = .4, label=T)
+
+Absorptive_Expression_matrix <- as.data.frame(as.matrix(Absorptive@assays$RNA@data))
+fwrite(x = Absorptive_Expression_matrix, row.names= TRUE, file = "Absorptive_Expression_Matrix.txt")
+
+#This gives spatial data for each cell
+export(Absorptive@reductions$tsne@cell.embeddings, "Absorptive_tsne.csv",  row.names = TRUE)
+
+#This gives active idents (cell types) for each cell
+Absorptive_idents <- as.data.frame(as.matrix(Absorptive@active.ident))
+fwrite(x = Absorptive_idents, row.names= TRUE, file = "Absorptive_Idents.csv")
+
+
