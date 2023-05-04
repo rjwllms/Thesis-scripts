@@ -1,0 +1,94 @@
+#load monocle3 once installed
+library("monocle3")
+library("dplyr")
+library("ggplot2")
+
+# Provide the path to the Cell Ranger output.
+Mock <- load_cellranger_data("/Users/reeganwillms/Documents/Reegan/School/Docs_UAlberta/Foley Lab/Foley Lab/Adult Vibrio/Raw Data/Mock_2/")
+
+#preprocess
+Mock = preprocess_cds(Mock, num_dim = 50)
+
+plot_pc_variance_explained(Mock)
+
+#reduce dimensionality and visualize
+Mock <- reduce_dimension(Mock)
+
+plot_cells(Mock)
+
+plot_cells(Mock, genes=c("fabp6"))
+
+#Cluster cells
+Mock = cluster_cells(Mock)
+plot_cells(Mock)
+
+saveRDS(Mock, file = "Mock_Monocle.rds")
+Mock <- readRDS("/Users/reeganwillms/Documents/Reegan/School/Docs_UAlberta/Foley Lab/Foley Lab/Adult Vibrio/Mock_Monocle.rds")
+
+#Custom select tuft and progenitors (they cluster together)
+Tuft_subset <- choose_cells(Mock)
+
+#4x5 size is nice
+plot_cells(Tuft_subset, color_cells_by="partition")
+plot_cells(Tuft_subset, color_cells_by="cluster")
+plot_cells(Tuft_subset, genes = "pou2f3",
+           label_groups_by_cluster=FALSE,
+           label_leaves=FALSE,
+           label_branch_points=FALSE,
+           label_cell_groups = FALSE,
+           cell_size =2)+ scale_color_gradient(low="slategray3",high= "firebrick3")
+
+Tuft_subset = cluster_cells(Tuft_subset, resolution=1e-3)
+plot_cells(Tuft_subset, color_cells_by="partition")
+plot_cells(Tuft_subset, color_cells_by="cluster")
+
+Tuft_subset <- learn_graph(Tuft_subset)
+
+saveRDS(Tuft_subset, file = "Tuft_Monocle.rds")
+Tuft_subset <- readRDS("/Users/reeganwillms/Documents/Reegan/School/Docs_UAlberta/Foley Lab/Foley Lab/Adult Vibrio/Tuft_Monocle.rds")
+
+
+plot_cells(Tuft_subset,
+           color_cells_by = "cluster",
+           label_groups_by_cluster=FALSE,
+           label_leaves=FALSE,
+           label_branch_points=FALSE)
+
+plot_cells(Tuft_subset,
+           color_cells_by = "partition",
+           label_groups_by_cluster=FALSE,
+           label_leaves=TRUE,
+           label_branch_points=TRUE)
+
+Tuft_subset <- order_cells(Tuft_subset)
+
+#4x6
+plot_cells(Tuft_subset,
+           color_cells_by = "pseudotime",
+           label_cell_groups=FALSE,
+           label_leaves=FALSE,
+           label_branch_points=FALSE,
+           graph_label_size=0,
+           cell_size =1)
+
+plot_cells(Tuft_subset,
+           color_cells_by = "cluster",
+           label_cell_groups=FALSE,
+           label_leaves=FALSE,
+           label_branch_points=FALSE,
+           graph_label_size=0)
+
+Tuft_subset_pr_test_res <- graph_test(Tuft_subset, neighbor_graph="principal_graph", cores=4)
+pr_deg_ids <- row.names(subset(Tuft_subset_pr_test_res, q_value < 0.05))
+
+export(pr_deg_ids, "pr_deg_ids.csv",  row.names = TRUE)
+
+Tuft_genes <- c("tnfrsf11a","tnfrsf11b", "pou2f3")
+Tuft_lineage_cds <- Tuft_subset[rowData(Tuft_subset)$gene_short_name %in% Tuft_genes,
+                       colData(Tuft_subset)$cluster %in% c("1,2,3")]
+
+
+plot_genes_in_pseudotime(Tuft_lineage_cds,
+                         color_cells_by="cluster",
+                         min_expr=0.5)
+
