@@ -1,0 +1,183 @@
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(cowplot)
+library(patchwork)
+library(multtest)
+library(metap)
+
+#Import dataset #Data files need to be in working directory #V52=V52; Mock=MOCK
+v52.data <- Read10X(data.dir = "/Users/reeganwillms/Documents/Reegan/School/Docs_UAlberta/Foley Lab/Foley Lab/Adult Vibrio/Raw Data/V52_tx/filtered_feature_bc_matrix/")
+mock.data <- Read10X(data.dir = "/Users/reeganwillms/Documents/Reegan/School/Docs_UAlberta/Foley Lab/Foley Lab/Adult Vibrio/Raw Data/Mock_tx/filtered_feature_bc_matrix/")
+
+# Set up control object (mock in place of ctrl, DIG_MOCK - IMMUNE_CTRL, MOCK = CTRL)
+mock <- CreateSeuratObject(counts = mock.data, project = "DIG_MOCK", min.cells = 3)
+mock$v52 <- "MOCK"
+mock <- SUBSET(mock, SUBSET = nFeature_RNA > 200 & nFeature_RNA < 2500)
+mock <- NormalizeData(mock, verbose = FALSE)
+mock[["percent.mt"]] <- PercentageFeatureSet(mock, pattern = "^mt-")
+mock <- SUBSET(mock, SUBSET = percent.mt < 25)
+mock <- FindVariableFeatures(mock, selection.method = "vst", nfeatures = 2000)
+
+# Set up stimulated object (v52 = stim, DIG_V52 = IMMUNE_STIM, V52 = STIM)
+v52 <- CreateSeuratObject(counts = v52.data, project = "DIG_V52", min.cells = 3)
+v52$v52 <- "V52"
+v52 <- SUBSET(v52, SUBSET = nFeature_RNA > 200 & nFeature_RNA < 2500)
+v52 <- NormalizeData(v52, verbose = FALSE)
+v52[["percent.mt"]] <- PercentageFeatureSet(v52, pattern = "^mt-")
+v52 <- SUBSET(v52, SUBSET = percent.mt < 25)
+v52 <- FindVariableFeatures(v52, selection.method = "vst", nfeatures = 2000)
+
+#Integration
+Dig.anchors <- FindIntegrationAnchors(object.list = list(mock, v52), dims = 1:50)
+Dig.combined <- IntegrateData(anchorset = Dig.anchors, dims = 1:50)
+
+#RDS to HERE NOW WITH MITO20 CUTOFF
+saveRDS(Dig.combined, file = "combined.rds")
+
+#Reegan with mito 25 - combined2 includes UMAP/TNSE, Reduction, etc.
+Dig.combined <- readRDS("/Users/reeganwillms/Documents/Reegan/School/Docs_UAlberta/Foley Lab/Foley Lab/Adult Vibrio/combined.rds")
+
+
+#Find conserved markers
+DefaultAssay(Dig.combined) <- "integrated"
+
+# Run the standard workflow for visualization and clustering
+Dig.combined <- ScaleData(Dig.combined, verbose = FALSE)
+Dig.combined <- RunPCA(Dig.combined, npcs = 50, verbose = FALSE)
+
+# UMAP and Clustering
+Dig.combined <- RunUMAP(Dig.combined, reduction = "pca", dims = 1:50)
+Dig.combined <- RunTSNE(Dig.combined, reduction = "pca", dims = 1:50)
+Dig.combined <- FindNeighbors(Dig.combined, reduction = "pca", dims = 1:50)
+Dig.combined <- FindClusters(Dig.combined, resolution = 0.8)
+
+#RDS to HERE 
+saveRDS(Dig.combined, file = "combined2.rds")
+
+#Combined2 includes UMAP/TNSE, Reduction, etc.
+Dig.combined <- readRDS("/Users/reeganwillms/Documents/Reegan/School/Docs_UAlberta/Foley Lab/Foley Lab/Adult Vibrio/combined2.rds")
+
+# Visualization - 10x4.5
+p1 <- DimPlot(Dig.combined, reduction = "tsne", group.by = "v52")
+p2 <- DimPlot(Dig.combined, reduction = "tsne", label = TRUE)
+plot_grid(p1, p2)
+
+DimPlot(Dig.combined, reduction = "tsne", split.by = "v52",label=T)
+DimPlot(Dig.combined, reduction = "tsne", label=TRUE)
+
+DefaultAssay(Dig.combined) <- "RNA"
+
+COMBINED.markers <- FindAllMarkers(Dig.combined, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.5,grouping.var = "v52", verbose = FALSE)
+
+
+DotPlot(object = Dig.combined, features = clusterfeatures, dot.scale = 6) + coord_flip() + RotatedAxis() + theme(axis.text.y = element_text(face = "italic")) +scale_colour_gradient2(low = "royalblue4", mid = "gainsboro", high = "deeppink4")
+
+
+VlnPlot(Dig.combined, features = c("cftr"),pt.size = 0.5,split.by = "v52")
+
+FeaturePlot(Dig.combined, features = c("rsad2"), reduction = "tsne", split.by = "v52")
+FeaturePlot(Dig.combined, features = c("cftr"), reduction = "tsne", split.by = "v52",cols = c("gainsboro", "burlywood3", "brown4"))
+
+#RE-ASSIGN IDENTS
+Dig.combined <- RenameIdents(Dig.combined, `0`= "EC1",`1`="LRE1",`2`="EC3",`3`="Goblet",
+                     `4`="BO1",`5`="Leukocyte 1",`6`="LRE2",`7`="Progenitor",`8`="LRE3",
+                     `9`="Tuft-like",`10`="Endocrine 1",`11`="EC2",`12`="Goblet-like",
+                     `13`="Leukocyte 3",`14`="Leukocyte 2",`15`="Endocrine 2",`16`="Leukocyte 4",
+                     `17` = "Cycling",`18`="Endocrine 4",`19`="Stromal",`20`="Endocrine 3",
+                     `21`="Unknown 1",`22`="Leukocyte 6",`23`="BO2",`24`="Endocrine 6",`25` = "Epidermal",
+                     `26`="Endocrine 7", `27` = "Endocrine 5",`28`="Unknown 2",`29`="Pancreatic")
+
+Combined_levels <- c("Progenitor", "Cycling", 
+                     "Endocrine 1","Endocrine 2","Endocrine 3","Endocrine 4","Endocrine 5","Endocrine 6","Endocrine 7",
+                     "Goblet","Goblet-like","Tuft-like",
+                     "EC1","EC2","EC3","LRE1","LRE2","LRE3","BO1","BO2",
+                     "Stromal","Leukocyte 1","Leukocyte 2","Leukocyte 3",
+                     "Leukocyte 4","Leukocyte 6","Pancreatic","Epidermal",
+                     "Unknown 1","Unknown 2")
+
+levels(Dig.combined) <- Combined_levels
+
+#FOR WHOLE IEC DE ANALYSIS
+Dig.combined <- RenameIdents(Dig.combined, `0`= "IEC",`1`="IEC",`2`="IEC",`3`="IEC",
+                             `4`="IEC",`5`="Leukocyte 1",`6`="IEC",`7`="IEC",`8`="IEC",
+                             `9`="IEC",`10`="IEC",`11`="IEC",`12`="IEC",
+                             `13`="Leukocyte 3",`14`="Leukocyte 2",`15`="IEC",`16`="Leukocyte 4",
+                             `17` = "IEC",`18`="IEC",`19`="Stromal",`20`="IEC",
+                             `21`="Unknown 1",`22`="Leukocyte 6",`23`="IEC",`24`="IEC",`25` = "Epidermal",
+                             `26`="IEC", `27` = "IEC",`28`="Unknown 2",`29`="Pancreatic")
+
+#FOR WHOLE IEC DE ANALYSIS
+Dig.combined <- RenameIdents(Dig.combined, `0`= "EC",`1`="LRE",`2`="EC",`3`="Goblet",
+                             `4`="BO",`5`="Leukocyte 1",`6`="LRE",`7`="Progenitor",`8`="LRE",
+                             `9`="Tuft-like",`10`="Endocrine",`11`="EC",`12`="Goblet",
+                             `13`="Leukocyte 3",`14`="Leukocyte 2",`15`="Endocrine",`16`="Leukocyte 4",
+                             `17` = "Progenitor",`18`="Endocrine",`19`="Stromal",`20`="Endocrine",
+                             `21`="Unknown 1",`22`="Leukocyte 6",`23`="BO",`24`="Endocrine",`25` = "Epidermal",
+                             `26`="Endocrine", `27` = "Endocrine",`28`="Unknown 2",`29`="Pancreatic")
+
+Combined_levels <- c("Progenitor","Endocrine",
+                     "Goblet","Tuft-like",
+                     "EC","LRE","BO",
+                     "Stromal","Leukocyte 1","Leukocyte 2","Leukocyte 3",
+                     "Leukocyte 4","Leukocyte 6","Pancreatic","Epidermal",
+                     "Unknown 1","Unknown 2")
+
+levels(Dig.combined) <- Combined_levels
+
+#Identify conserved markers
+CL5.markers <- FindConservedMarkers(Dig.combined, ident.1 = 5, grouping.var = "v52", verbose = FALSE)
+
+table(Idents(Dig.combined))
+
+#SUBSETS
+#NO SUB CLUSTERS
+IEC_subset <- subset(Dig.combined, idents = c("Progenitor","Endocrine",
+                                              "Goblet","Tuft-like",
+                                              "EC","LRE","BO"))
+IEC_levels <- c("Progenitor","Endocrine",
+                "Goblet","Tuft-like",
+                "EC","LRE","BO")
+levels(IEC_subset) <- IEC_levels
+
+DefaultAssay(IEC_subset) <- "integrated"
+IEC_subset <- FindVariableFeatures(IEC_subset, selection.method = "vst", nfeatures = 2000)
+IEC_subset <- ScaleData(IEC_subset)
+DefaultAssay(IEC_subset) <- "RNA"
+
+
+#OR with subclusters
+IEC_subset <- subset(Dig.combined, idents = c("Progenitor", "Cycling", 
+                                              "Endocrine 1","Endocrine 2","Endocrine 3","Endocrine 4","Endocrine 5","Endocrine 6","Endocrine 7",
+                                              "Goblet","Goblet-like","Tuft-like",
+                                              "EC1","EC2","EC3","LRE1","LRE2","LRE3","BO1","BO2"))
+IEC_levels <- c("Progenitor", "Cycling", 
+                "Endocrine 1","Endocrine 2","Endocrine 3","Endocrine 4","Endocrine 5","Endocrine 6","Endocrine 7",
+                "Goblet","Goblet-like","Tuft-like",
+                "EC1","EC2","EC3","LRE1","LRE2","LRE3","BO1","BO2")
+levels(IEC_subset) <- IEC_levels
+DimPlot(IEC_subset, reduction = "tsne", label=TRUE)
+DimPlot(IEC_subset, reduction = "tsne", split.by = "v52",label=T)
+
+IEC_subset$celltype.v52 <- paste(Idents(IEC_subset), IEC_subset$v52, sep = "_")
+IEC_subset$celltype <- Idents(IEC_subset)
+Idents(IEC_subset) <- "celltype.v52"
+DefaultAssay(IEC_subset) <- "RNA"
+
+IEC_DE <- FindMarkers(Dig.combined, ident.1 = "IEC_V52",ident.2 = "IEC_MOCK", verbose = FALSE, logfc.threshold = 0.25)
+
+table(Idents(IEC_subset))
+
+#Find differentially expressed genes in clusters; BO is given as example.
+Dig.combined$celltype.v52 <- paste(Idents(Dig.combined), Dig.combined$v52, sep = "_")
+Dig.combined$celltype <- Idents(Dig.combined)
+Idents(Dig.combined) <- "celltype.v52"
+DefaultAssay(Dig.combined) <- "RNA"
+
+BO_combined_DE <- FindMarkers(Dig.combined, ident.1 = "BO_V52",ident.2 = "BO_MOCK", verbose = FALSE, logfc.threshold = 0.25)
+
+library(rio)
+export(BO_combined_DE, "BO_combined_DE.xlsx",  rowNames = TRUE)
+
+
+
